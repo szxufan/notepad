@@ -1,0 +1,56 @@
+name: notepad
+description: "一个桌面端纯文本记事本应用，支持多文件编辑、查找替换、草稿自动保存。"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  provider: ^6.1.0
+  path_provider: ^2.1.0
+  path: ^1.9.0
+  file_selector: ^1.0.0
+  uuid: ^4.0.0
+  http: ^1.2.0
+  desktop_drop: ^0.4.4
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/fonts/LICENSE.txt
+  fonts:
+    - family: SarasaMonoSC
+      fonts:
+        - asset: assets/fonts/SarasaMonoSC-ExtraLight.ttf
+          weight: 200
+        - asset: assets/fonts/SarasaMonoSC-ExtraLightItalic.ttf
+          weight: 200
+          style: italic
+        - asset: assets/fonts/SarasaMonoSC-Light.ttf
+          weight: 300
+        - asset: assets/fonts/SarasaMonoSC-LightItalic.ttf
+          weight: 300
+          style: italic
+        - asset: assets/fonts/SarasaMonoSC-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/SarasaMonoSC-Italic.ttf
+          weight: 400
+          style: italic
+        - asset: assets/fonts/SarasaMonoSC-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/SarasaMonoSC-SemiBoldItalic.ttf
+          weight: 600
+          style: italic
+        - asset: assets/fonts/SarasaMonoSC-Bold.ttf
+          weight: 700
+        - asset: assets/fonts/SarasaMonoSC-BoldItalic.ttf
+          weight: 700
+          style: italic
