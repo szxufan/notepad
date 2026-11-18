@@ -15,8 +15,11 @@ class AiConfig {
   /// 模型名称。
   final String model;
 
-  /// 发送给 AI 的最大输入字数（超出部分截断）。
+  /// 发送给 AI 的最大输入字数（标题超出截断，文本操作超出拒绝）。
   final int maxInputChars;
+
+  /// 翻译目标语言（自由文本，如 '英文'、'中文'、'日文'）。
+  final String targetLanguage;
 
   /// 默认配置。
   static const AiConfig defaultConfig = AiConfig(
@@ -24,6 +27,7 @@ class AiConfig {
     apiToken: '',
     model: 'gpt-4o-mini',
     maxInputChars: 2000,
+    targetLanguage: '英文',
   );
 
   /// 创建 [AiConfig] 实例。
@@ -32,6 +36,7 @@ class AiConfig {
     required this.apiToken,
     required this.model,
     required this.maxInputChars,
+    this.targetLanguage = '英文',
   });
 
   /// 是否已完成必要配置（端点、Token、模型均非空）。
@@ -50,6 +55,8 @@ class AiConfig {
       model: json['model'] as String? ?? defaultConfig.model,
       maxInputChars:
           json['maxInputChars'] as int? ?? defaultConfig.maxInputChars,
+      targetLanguage:
+          json['targetLanguage'] as String? ?? defaultConfig.targetLanguage,
     );
   }
 
@@ -60,6 +67,7 @@ class AiConfig {
       'apiToken': apiToken,
       'model': model,
       'maxInputChars': maxInputChars,
+      'targetLanguage': targetLanguage,
     };
   }
 
@@ -69,12 +77,14 @@ class AiConfig {
     String? apiToken,
     String? model,
     int? maxInputChars,
+    String? targetLanguage,
   }) {
     return AiConfig(
       apiEndpoint: apiEndpoint ?? this.apiEndpoint,
       apiToken: apiToken ?? this.apiToken,
       model: model ?? this.model,
       maxInputChars: maxInputChars ?? this.maxInputChars,
+      targetLanguage: targetLanguage ?? this.targetLanguage,
     );
   }
 }

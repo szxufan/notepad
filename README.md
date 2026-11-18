@@ -14,6 +14,7 @@
 - **状态栏信息**：光标行列、字符数（含选区计数）、文件编码、字号、修改状态
 - **外部修改监听**：文件被其他程序修改时，无本地修改自动重载，有未保存修改时询问是否重载；文件被外部删除时提示
 - **AI 标题**：新建未保存文件内容超过阈值后自动生成标题（需在设置中配置 AI 接口）
+- **AI 文本操作**：选中文本后右键菜单提供摘要、润色、翻译；结果先预览再应用，翻译可选「替换原文」或「保留原文插入」，目标语言在 AI 设置中配置；选区长度受「最大输入字数」限制
 - **草稿自动保存**：每 30 秒自动保存草稿，防止掉电丢失
 - **关闭窗口保留草稿**：关闭窗口时自动保存所有打开文件
 - **启动自动恢复**：下次启动时自动加载上次打开的所有文件
@@ -51,7 +52,9 @@ lib/
 │   ├── encoding_service.dart    # 编码检测与编解码
 │   ├── file_watch_service.dart  # 外部修改监听
 │   ├── ai_config_service.dart   # AI 配置持久化
-│   └── ai_title_service.dart    # AI 标题生成
+│   ├── ai_chat_client.dart      # AI 聊天接口通用客户端
+│   ├── ai_title_service.dart    # AI 标题生成
+│   └── ai_text_service.dart     # AI 摘要/润色/翻译
 ├── widgets/
 │   ├── file_list_panel.dart     # 左侧文件列表面板
 │   ├── editor_panel.dart        # 右侧编辑区域
@@ -59,6 +62,7 @@ lib/
 │   ├── global_search_panel.dart # 全局搜索面板
 │   ├── status_bar.dart          # 底部状态栏
 │   ├── ai_settings_dialog.dart  # AI 设置对话框
+│   ├── ai_text_result_dialog.dart # AI 文本结果预览对话框
 │   └── highlighting_controller.dart # 高亮文本控制器
 └── pages/
     └── home_page.dart           # 主页面布局

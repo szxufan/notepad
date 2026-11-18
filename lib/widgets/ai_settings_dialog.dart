@@ -1,6 +1,6 @@
 /// AI 设置对话框。
 ///
-/// 配置 OpenAI 兼容接口的端点、Token、模型、最大输入字数，
+/// 配置 OpenAI 兼容接口的端点、Token、模型、最大输入字数、翻译目标语言，
 /// 保存后持久化到本地配置文件。
 library widgets.ai_settings_dialog;
 
@@ -32,6 +32,7 @@ class _AiSettingsDialogState extends State<AiSettingsDialog> {
   final _tokenController = TextEditingController();
   final _modelController = TextEditingController();
   final _maxCharsController = TextEditingController();
+  final _targetLangController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
 
   bool _loading = true;
@@ -49,6 +50,7 @@ class _AiSettingsDialogState extends State<AiSettingsDialog> {
     _tokenController.dispose();
     _modelController.dispose();
     _maxCharsController.dispose();
+    _targetLangController.dispose();
     super.dispose();
   }
 
@@ -61,6 +63,7 @@ class _AiSettingsDialogState extends State<AiSettingsDialog> {
     _tokenController.text = config.apiToken;
     _modelController.text = config.model;
     _maxCharsController.text = config.maxInputChars.toString();
+    _targetLangController.text = config.targetLanguage;
     setState(() => _loading = false);
   }
 
@@ -73,6 +76,7 @@ class _AiSettingsDialogState extends State<AiSettingsDialog> {
       apiToken: _tokenController.text.trim(),
       model: _modelController.text.trim(),
       maxInputChars: int.parse(_maxCharsController.text.trim()),
+      targetLanguage: _targetLangController.text.trim(),
     );
     try {
       await context.read<AiConfigService>().save(config);
@@ -161,6 +165,18 @@ class _AiSettingsDialogState extends State<AiSettingsDialog> {
                         }
                         return null;
                       },
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: _targetLangController,
+                      decoration: const InputDecoration(
+                        labelText: '翻译目标语言',
+                        hintText: '英文',
+                        helperText: '如：英文、中文、日文',
+                      ),
+                      validator: (v) => (v == null || v.trim().isEmpty)
+                          ? '请输入翻译目标语言'
+                          : null,
                     ),
                   ],
                 ),

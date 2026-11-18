@@ -1,7 +1,8 @@
 /// 右侧编辑区域组件。
 ///
 /// 使用多行 [TextField] 显示和编辑纯文本内容，
-/// 支持等宽字体和 Ctrl+滚轮调节字体大小。
+/// 支持等宽字体、Ctrl+滚轮调节字体大小，
+/// 右键菜单提供 AI 摘要/润色/翻译选中文本。
 library widgets.editor_panel;
 
 import 'dart:async';
@@ -14,7 +15,14 @@ import 'package:provider/provider.dart';
 import '../providers/cursor_provider.dart';
 import '../providers/editor_provider.dart';
 import '../providers/file_list_provider.dart';
+import '../services/ai_config_service.dart';
+import '../services/ai_text_service.dart';
+import 'ai_settings_dialog.dart';
+import 'ai_text_result_dialog.dart';
 import 'highlighting_controller.dart';
+
+/// AI 文本操作类型。
+enum _AiAction { summarize, polish, translate }
 
 /// 右侧编辑区域。
 class EditorPanel extends StatefulWidget {
@@ -136,6 +144,119 @@ class _EditorPanelState extends State<EditorPanel> {
     });
   }
 
+  /// 启动 AI 文本操作：捕获选区快照，弹出结果对话框。
+  void _startAiAction(EditableTextState editableTextState, _AiAction action) {
+    editableTextState.hideToolbar();
+    final selection = editableTextState.textEditingValue.selection;
+    if (!selection.isValid || selection.isCollapsed) return;
+    final content = _controller.text;
+    final text = selection.textInside(content);
+    final range = TextRange(start: selection.start, end: selection.end);
+    final fileId = context.read<FileListProvider>().activeFile?.id;
+
+    final config = context.read<AiConfigService>().config;
+    if (!config.isConfigured) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('AI 接口未配置，请先在设置中完成配置')),
+      );
+      AiSettingsDialog.show(context);
+      return;
+    }
+
+    final service = context.read<AiTextService>();
+    final (label, allowKeepOriginal) = switch (action) {
+      _AiAction.summarize => ('摘要', false),
+      _AiAction.polish => ('润色', false),
+      _AiAction.translate => ('翻译', true),
+    };
+    AiTextResultDialog.show(
+      context,
+      actionLabel: label,
+      allowKeepOriginal: allowKeepOriginal,
+      task: () => switch (action) {
+        _AiAction.summarize => service.summarize(text, config),
+        _AiAction.polish => service.polish(text, config),
+        _AiAction.translate => service.translate(text, config),
+      },
+      onApply: (result, keepOriginal) =>
+          _applyAiResult(fileId, range, content, result, keepOriginal),
+    );
+  }
+
+  /// 将 AI 结果应用到文件（替换选区或保留原文插入）。
+  void _applyAiResult(
+    String? fileId,
+    TextRange range,
+    String contentAtInvocation,
+    String result,
+    bool keepOriginal,
+  ) {
+    if (!mounted) return;
+    final fileList = context.read<FileListProvider>();
+    final editor = context.read<EditorProvider>();
+    final activeFile = fileList.activeFile;
+    if (activeFile == null || activeFile.id != fileId) return;
+    // 陈旧守卫：弹窗期间内容若变化（如外部修改自动重载），偏移不再可靠
+    if (activeFile.content != contentAtInvocation) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('文件内容已变化，无法应用结果')),
+      );
+      return;
+    }
+    final content = activeFile.content;
+    String newContent;
+    if (keepOriginal) {
+      // 在选区之后插入译文，沿用文件换行符并避免与相邻文字粘连
+      final lineEnding =
+          RegExp(r'\r\n|\r|\n').firstMatch(content)?.group(0) ?? '\n';
+      final needsLeading = range.end > 0 &&
+          content[range.end - 1] != '\n' &&
+          content[range.end - 1] != '\r';
+      final needsTrailing = range.end < content.length &&
+          content[range.end] != '\n' &&
+          content[range.end] != '\r';
+      final insertion = '${needsLeading ? lineEnding : ''}'
+          '$result${needsTrailing ? lineEnding : ''}';
+      newContent = content.replaceRange(range.end, range.end, insertion);
+    } else {
+      newContent = content.replaceRange(range.start, range.end, result);
+    }
+    fileList.updateContent(activeFile.id, newContent);
+    editor.updateContent(newContent);
+  }
+
+  /// 构建编辑器右键菜单：默认项 + 有选区时追加 AI 操作。
+  Widget _buildContextMenu(
+    BuildContext context,
+    EditableTextState editableTextState,
+  ) {
+    final buttonItems =
+        List<ContextMenuButtonItem>.of(editableTextState.contextMenuButtonItems);
+    final selection = editableTextState.textEditingValue.selection;
+    if (selection.isValid && !selection.isCollapsed) {
+      buttonItems.addAll([
+        ContextMenuButtonItem(
+          label: 'AI 摘要',
+          onPressed: () =>
+              _startAiAction(editableTextState, _AiAction.summarize),
+        ),
+        ContextMenuButtonItem(
+          label: 'AI 润色',
+          onPressed: () => _startAiAction(editableTextState, _AiAction.polish),
+        ),
+        ContextMenuButtonItem(
+          label: 'AI 翻译',
+          onPressed: () =>
+              _startAiAction(editableTextState, _AiAction.translate),
+        ),
+      ]);
+    }
+    return AdaptiveTextSelectionToolbar.buttonItems(
+      anchors: editableTextState.contextMenuAnchors,
+      buttonItems: buttonItems,
+    );
+  }
+
   /// 处理 Ctrl/Cmd + 滚轮调节字体大小。
   bool _handlePointerSignal(PointerSignalEvent event) {
     if (event is PointerScrollEvent) {
@@ -186,6 +307,7 @@ class _EditorPanelState extends State<EditorPanel> {
           onChanged: (_) {
             _onContentChanged();
           },
+          contextMenuBuilder: _buildContextMenu,
           expands: true,
           maxLines: null,
           minLines: null,

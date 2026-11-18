@@ -14,6 +14,7 @@ import 'providers/cursor_provider.dart';
 import 'providers/editor_provider.dart';
 import 'providers/file_list_provider.dart';
 import 'services/ai_config_service.dart';
+import 'services/ai_text_service.dart';
 import 'services/ai_title_service.dart';
 import 'services/draft_service.dart';
 import 'services/encoding_service.dart';
@@ -36,6 +37,7 @@ void main() async {
   final fileWatchService = FileWatchService(encodingService: encodingService);
   final aiConfigService = AiConfigService();
   final aiTitleService = AiTitleService();
+  final aiTextService = AiTextService();
   await aiConfigService.load();
   _fileListProvider = FileListProvider(
     fileService: fileService,
@@ -83,6 +85,7 @@ void main() async {
         Provider<FileWatchService>.value(value: fileWatchService),
         Provider<AiConfigService>.value(value: aiConfigService),
         Provider<AiTitleService>.value(value: aiTitleService),
+        Provider<AiTextService>.value(value: aiTextService),
       ],
       child: const NotepadApp(),
     ),
