@@ -50,6 +50,11 @@ class NoteFile {
   /// 打开时自动检测，保存时沿用；新建文件默认 UTF-8。
   String encoding;
 
+  /// 是否为只读文件（超过大小阈值的大文件）。
+  ///
+  /// 只读文件禁止编辑与保存，草稿不持久化其内容。
+  bool isReadOnly;
+
   /// 创建 [NoteFile] 实例。
   NoteFile({
     required this.id,
@@ -64,6 +69,7 @@ class NoteFile {
     this.hasAiTitle = false,
     this.isTitleLocked = false,
     this.encoding = 'UTF-8',
+    this.isReadOnly = false,
   });
 
   /// 从磁盘文件创建 [NoteFile]。
@@ -72,6 +78,7 @@ class NoteFile {
     String path,
     String content, {
     String encoding = 'UTF-8',
+    bool isReadOnly = false,
   }) {
     final stat = FileStat.statSync(path);
     return NoteFile(
@@ -85,6 +92,7 @@ class NoteFile {
       lastSavedAt: stat.modified,
       isNew: false,
       encoding: encoding,
+      isReadOnly: isReadOnly,
     );
   }
 
@@ -103,6 +111,7 @@ class NoteFile {
           : null,
       isNew: json['isNew'] as bool? ?? false,
       encoding: json['encoding'] as String? ?? 'UTF-8',
+      isReadOnly: json['isReadOnly'] as bool? ?? false,
     );
   }
 
@@ -119,6 +128,7 @@ class NoteFile {
       'lastSavedAt': lastSavedAt?.toIso8601String(),
       'isNew': isNew,
       'encoding': encoding,
+      'isReadOnly': isReadOnly,
     };
   }
 
@@ -136,6 +146,7 @@ class NoteFile {
     bool? hasAiTitle,
     bool? isTitleLocked,
     String? encoding,
+    bool? isReadOnly,
   }) {
     return NoteFile(
       id: id ?? this.id,
@@ -150,6 +161,7 @@ class NoteFile {
       hasAiTitle: hasAiTitle ?? this.hasAiTitle,
       isTitleLocked: isTitleLocked ?? this.isTitleLocked,
       encoding: encoding ?? this.encoding,
+      isReadOnly: isReadOnly ?? this.isReadOnly,
     );
   }
 

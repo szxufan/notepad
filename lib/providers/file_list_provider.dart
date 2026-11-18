@@ -126,6 +126,58 @@ class FileListProvider extends ChangeNotifier {
     return closed;
   }
 
+  /// 关闭指定 ID 的文件，返回实际关闭的文件列表。
+  ///
+  /// 批量异步操作完成期间新打开的文件不在 [ids] 中，因此不会被误关闭。
+  List<NoteFile> closeFiles(Iterable<String> ids) {
+    final idSet = ids.toSet();
+    if (idSet.isEmpty) return [];
+    return _removeWhere((f) => idSet.contains(f.id));
+  }
+
+  /// 批量移除满足条件的文件，活动文件被移除时切换到剩余首个。
+  ///
+  /// 返回的列表保持原列表顺序，整个过程仅通知一次。
+  List<NoteFile> _removeWhere(bool Function(NoteFile) test) {
+    final activeIndex = _files.indexWhere((f) => f.id == _activeFileId);
+    var activeRemoved = false;
+    final removed = <NoteFile>[];
+    // 倒序移除，避免索引偏移
+    for (var i = _files.length - 1; i >= 0; i--) {
+      if (test(_files[i])) {
+        if (i == activeIndex) activeRemoved = true;
+        removed.add(_files.removeAt(i));
+      }
+    }
+    if (activeRemoved) {
+      _activeFileId = _files.isNotEmpty ? _files.first.id : null;
+    }
+    notifyListeners();
+    return removed.reversed.toList();
+  }
+
+  /// 调整文件列表顺序（拖拽排序）。
+  ///
+  /// [newIndex] 为移除拖拽项后的目标位置（与
+  /// ReorderableListView.onReorderItem 语义一致）。顺序随草稿持久化。
+  void reorderFiles(int oldIndex, int newIndex) {
+    if (oldIndex < 0 || oldIndex >= _files.length) return;
+    if (newIndex == oldIndex) return;
+    final file = _files.removeAt(oldIndex);
+    _files.insert(newIndex.clamp(0, _files.length), file);
+    notifyListeners();
+  }
+
+  /// 重命名磁盘文件并更新列表条目。
+  ///
+  /// 名称非法或目标已存在时抛出异常，由调用方提示用户。
+  void renameFile(String id, String newName) {
+    final index = _files.indexWhere((f) => f.id == id);
+    if (index < 0) return;
+    _files[index] = fileService.renameFile(_files[index], newName);
+    notifyListeners();
+  }
+
   /// 切换活动文件。
   void switchToFile(String id) {
     if (_activeFileId == id) return;
@@ -139,33 +191,57 @@ class FileListProvider extends ChangeNotifier {
   ///
   /// 如果文件未命名（filePath 为 null），应先调用 [saveFileAs]。
   Future<void> saveFile(String id) async {
-    final index = _files.indexWhere((f) => f.id == id);
-    if (index < 0) return;
-    final file = _files[index];
+    final file = getFile(id);
+    if (file == null || file.isReadOnly) return;
     final saved = await fileService.saveFile(file);
-    _files[index] = saved;
-    notifyListeners();
+    _applySaveResult(id, saved);
   }
 
   /// 另存为。
   ///
   /// 返回是否成功保存。用户取消时返回 false。
   Future<bool> saveFileAs(String id) async {
-    final index = _files.indexWhere((f) => f.id == id);
-    if (index < 0) return false;
-    final file = _files[index];
+    final file = getFile(id);
+    if (file == null || file.isReadOnly) return false;
     final saved = await fileService.saveFileAs(file);
     if (saved == null) return false;
-    _files[index] = saved;
-    notifyListeners();
+    _applySaveResult(id, saved, updatePath: true);
     return true;
   }
 
+  /// 将保存元数据合并到最新条目，避免覆盖等待期间的排序与新编辑。
+  void _applySaveResult(
+    String id,
+    NoteFile saved, {
+    bool updatePath = false,
+  }) {
+    final index = _files.indexWhere((f) => f.id == id);
+    if (index < 0) return;
+    final current = _files[index];
+    // 普通保存期间若文件已重命名，落盘的是旧路径，不能把新路径标为已保存。
+    if (!updatePath && current.filePath != saved.filePath) return;
+    _files[index] = current.copyWith(
+      filePath: saved.filePath,
+      title: updatePath ? saved.title : current.title,
+      diskContent: saved.diskContent,
+      isDirty: current.content != saved.diskContent,
+      lastModified: current.content == saved.content
+          ? saved.lastModified
+          : current.lastModified,
+      lastSavedAt: saved.lastSavedAt,
+      isNew: false,
+    );
+    notifyListeners();
+  }
+
   /// 更新文件内容。
+  ///
+  /// 只读文件（大文件）的内容变更被集中拦截，覆盖编辑/AI/替换等所有入口。
   void updateContent(String id, String content) {
     final index = _files.indexWhere((f) => f.id == id);
     if (index < 0) return;
     final file = _files[index];
+    if (file.isReadOnly) return;
     if (file.content == content) return;
     var updated = file.copyWith(
       content: content,
@@ -286,14 +362,16 @@ class FileListProvider extends ChangeNotifier {
 
   /// 保存所有未保存的文件。
   Future<void> saveAll() async {
-    for (var i = 0; i < _files.length; i++) {
-      final file = _files[i];
-      if (file.isDirty && file.filePath != null) {
-        final saved = await fileService.saveFile(file);
-        _files[i] = saved;
+    final ids = _files.map((file) => file.id).toList();
+    for (final id in ids) {
+      final file = getFile(id);
+      if (file != null &&
+          file.isDirty &&
+          !file.isReadOnly &&
+          file.filePath != null) {
+        await saveFile(id);
       }
     }
-    notifyListeners();
   }
 
   /// 用外部修改后的磁盘内容重载文件。
@@ -337,8 +415,7 @@ class FileListProvider extends ChangeNotifier {
       setSaveEncoding(id, encodingName);
       return;
     }
-    final text =
-        fileService.readFileWithEncoding(file.filePath!, encodingName);
+    final text = fileService.readFileWithEncoding(file.filePath!, encodingName);
     final stat = FileStat.statSync(file.filePath!);
     _files[index] = file.copyWith(
       content: text,

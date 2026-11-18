@@ -13,14 +13,18 @@ import 'package:path_provider/path_provider.dart';
 
 import '../models/note_file.dart';
 import 'encoding_service.dart';
+import 'file_service.dart';
 
 /// 草稿服务类。
 class DraftService {
-  DraftService({EncodingService? encodingService})
+  DraftService({EncodingService? encodingService, this.fileService})
       : encodingService = encodingService ?? const EncodingService();
 
   /// 编码服务（按草稿记录的编码读取磁盘新内容）。
   final EncodingService encodingService;
+
+  /// 文件服务（可选，用于恢复只读大文件时复用大小/编码逻辑）。
+  final FileService? fileService;
 
   /// 草稿文件名。
   static const String draftFileName = 'drafts.json';
@@ -58,7 +62,15 @@ class DraftService {
       if (!dir.existsSync()) {
         dir.createSync(recursive: true);
       }
-      final jsonList = files.map((f) => f.toJson()).toList();
+      final jsonList = files.map((f) {
+        final json = f.toJson();
+        // 只读大文件不持久化内容，恢复时从磁盘重读，避免草稿膨胀
+        if (f.isReadOnly && f.filePath != null) {
+          json['content'] = '';
+          json['diskContent'] = null;
+        }
+        return json;
+      }).toList();
       final jsonStr = const JsonEncoder().convert(jsonList);
       // 先写入临时文件再重命名，保证原子性
       final tempPath = '$path.tmp';
@@ -93,6 +105,17 @@ class DraftService {
       final result = <NoteFile>[];
       for (final draft in drafts) {
         try {
+          // 只读大文件：草稿不含内容，从磁盘重开（复用大小/编码逻辑）
+          if (draft.isReadOnly && draft.filePath != null) {
+            final service = fileService;
+            if (service != null && File(draft.filePath!).existsSync()) {
+              result.add(
+                  service.openFile(draft.filePath!).copyWith(id: draft.id));
+            } else {
+              result.add(draft);
+            }
+            continue;
+          }
           if (draft.filePath != null && File(draft.filePath!).existsSync()) {
             final stat = FileStat.statSync(draft.filePath!);
             final diskModified = stat.modified;
@@ -101,16 +124,26 @@ class DraftService {
                 draft.lastModified.isAtSameMomentAs(diskModified)) {
               result.add(draft);
             } else {
-              // 磁盘文件更新，按草稿记录的编码重新读取。
-              final bytes = File(draft.filePath!).readAsBytesSync();
-              final diskContent = encodingService.decode(bytes, draft.encoding);
-              result.add(draft.copyWith(
-                content: diskContent,
-                diskContent: diskContent,
-                isDirty: false,
-                lastModified: diskModified,
-                lastSavedAt: diskModified,
-              ));
+              final service = fileService;
+              if (service != null &&
+                  stat.size > service.readOnlyThresholdBytes) {
+                // 打开后文件可能已增长为大文件，必须复用预览与上限保护，
+                // 不能沿普通草稿路径全量读入。
+                result.add(
+                    service.openFile(draft.filePath!).copyWith(id: draft.id));
+              } else {
+                // 磁盘文件更新，按草稿记录的编码重新读取。
+                final bytes = File(draft.filePath!).readAsBytesSync();
+                final diskContent =
+                    encodingService.decode(bytes, draft.encoding);
+                result.add(draft.copyWith(
+                  content: diskContent,
+                  diskContent: diskContent,
+                  isDirty: false,
+                  lastModified: diskModified,
+                  lastSavedAt: diskModified,
+                ));
+              }
             }
           } else {
             // 未保存文件或磁盘文件已删除，直接用草稿内容

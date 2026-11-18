@@ -27,14 +27,20 @@ late DraftService _draftService;
 /// 文件列表 Provider 实例（全局引用，用于窗口关闭时获取文件列表）。
 late FileListProvider _fileListProvider;
 
-void main() async {
+void main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // 初始化服务
   const encodingService = EncodingService();
-  _draftService = DraftService(encodingService: encodingService);
   final fileService = FileService(encodingService: encodingService);
-  final fileWatchService = FileWatchService(encodingService: encodingService);
+  _draftService = DraftService(
+    encodingService: encodingService,
+    fileService: fileService,
+  );
+  final fileWatchService = FileWatchService(
+    encodingService: encodingService,
+    fileService: fileService,
+  );
   final aiConfigService = AiConfigService();
   final aiTitleService = AiTitleService();
   final aiTextService = AiTextService();
@@ -87,14 +93,17 @@ void main() async {
         Provider<AiTitleService>.value(value: aiTitleService),
         Provider<AiTextService>.value(value: aiTextService),
       ],
-      child: const NotepadApp(),
+      child: NotepadApp(startupFiles: args),
     ),
   );
 }
 
 /// 应用根 Widget。
 class NotepadApp extends StatelessWidget {
-  const NotepadApp({super.key});
+  const NotepadApp({super.key, this.startupFiles = const []});
+
+  /// 命令行传入的待打开文件路径。
+  final List<String> startupFiles;
 
   @override
   Widget build(BuildContext context) {
@@ -111,7 +120,7 @@ class NotepadApp extends StatelessWidget {
         useMaterial3: true,
         brightness: Brightness.dark,
       ),
-      home: const HomePage(),
+      home: HomePage(startupFiles: startupFiles),
     );
   }
 }

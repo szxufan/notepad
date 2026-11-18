@@ -53,6 +53,15 @@ class StatusBar extends StatelessWidget {
               padding: EdgeInsets.only(right: 6),
               child: Icon(Icons.circle, size: 8, color: Colors.orange),
             ),
+          if (activeFile?.isReadOnly ?? false)
+            Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: Icon(
+                Icons.lock_outline,
+                size: 12,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
           Expanded(
             child: Text(
               path,
@@ -161,6 +170,10 @@ class _EncodingLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final name = file?.encoding ?? EncodingService.utf8Name;
+    // 只读大文件不提供编码切换（切换会重读磁盘，无意义）
+    if (file?.isReadOnly ?? false) {
+      return Text(name, style: Theme.of(context).textTheme.bodySmall);
+    }
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       child: GestureDetector(

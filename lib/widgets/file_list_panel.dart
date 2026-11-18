@@ -1,7 +1,7 @@
 /// 左侧文件列表面板。
 ///
 /// 显示所有打开的文件列表，高亮当前活动文件，
-/// 支持点击切换、右键菜单操作。
+/// 支持点击切换、拖拽排序、右键菜单操作（含批量关闭与重命名）。
 library widgets.file_list_panel;
 
 import 'package:flutter/material.dart';
@@ -10,6 +10,7 @@ import 'package:provider/provider.dart';
 import '../models/note_file.dart';
 import '../providers/file_list_provider.dart';
 import '../services/ai_title_service.dart';
+import '../services/file_service.dart';
 import 'ai_settings_dialog.dart';
 
 /// 保存文件，失败时提示（如编码无法表示内容）。
@@ -37,6 +38,108 @@ Future<bool> _saveFile(
   }
 }
 
+/// 逐个打开给定路径列表，单个失败不阻塞其余，失败以 SnackBar 提示。
+///
+/// 供打开对话框、拖拽、命令行参数等入口共用。
+void openFilePaths(
+  BuildContext context,
+  FileListProvider fileList,
+  List<String> paths,
+) {
+  for (final path in paths) {
+    if (path.isEmpty) continue;
+    try {
+      fileList.openFile(path);
+    } on FileTooLargeException catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$path: $e')),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('打开失败 $path: $e')),
+        );
+      }
+    }
+  }
+}
+
+/// 批量关闭文件，有未保存修改时统一确认。
+///
+/// [targets] 为待关闭文件列表。选择"全部保存"时逐个保存，任一失败或取消
+/// 则中止整批；等待期间新增或重新变脏的文件不会被旧操作误关闭。
+Future<void> _closeFilesWithConfirmation(
+  BuildContext context,
+  FileListProvider fileList,
+  List<NoteFile> targets,
+) async {
+  if (targets.isEmpty) return;
+  final targetIds = targets.map((file) => file.id).toList();
+  final dirty = targets.where((f) => f.isDirty).toList();
+  if (dirty.isEmpty) {
+    fileList.closeFiles(targetIds);
+    return;
+  }
+  final action = await showDialog<String>(
+    context: context,
+    builder: (dialogContext) {
+      return AlertDialog(
+        title: const Text('关闭文件'),
+        content: Text('${dirty.length} 个文件有未保存的修改，是否保存后关闭？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop('cancel'),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop('discard'),
+            child: const Text('不保存'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop('save'),
+            child: const Text('全部保存'),
+          ),
+        ],
+      );
+    },
+  );
+  if (!context.mounted || action == null || action == 'cancel') return;
+  if (action == 'save') {
+    for (final file in dirty) {
+      // 重取最新状态，避免基于过期快照保存
+      final current = fileList.getFile(file.id);
+      if (current == null || !current.isDirty) continue;
+      final saved = await _saveFile(context, fileList, current);
+      if (!saved) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('保存失败或已取消，批量关闭已中止')),
+          );
+        }
+        return;
+      }
+    }
+    // 原本干净的文件可能在等待其他文件保存时被编辑；已保存文件也可能
+    // 在异步落盘期间再次变脏。此时整批保留，由用户重新确认。
+    final hasNewChanges = targetIds.any(
+      (id) => fileList.getFile(id)?.isDirty ?? false,
+    );
+    if (hasNewChanges) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('关闭期间产生新修改，批量关闭已中止')),
+        );
+      }
+      return;
+    }
+  }
+  if (context.mounted) {
+    fileList.closeFiles(targetIds);
+  }
+}
+
 /// 左侧文件列表面板。
 class FileListPanel extends StatelessWidget {
   const FileListPanel({super.key});
@@ -44,6 +147,7 @@ class FileListPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final fileList = context.watch<FileListProvider>();
+    final active = fileList.activeFile;
 
     return Container(
       width: 250,
@@ -81,14 +185,18 @@ class FileListPanel extends StatelessWidget {
                 ),
                 IconButton(
                   icon: const Icon(Icons.folder_open, size: 20),
-                  tooltip: '打开文件 (Ctrl+O)',
+                  tooltip: '打开文件 (Ctrl+O，可多选)',
                   onPressed: () async {
-                    final path = await context
+                    final paths = await context
                         .read<FileListProvider>()
                         .fileService
-                        .pickFile();
-                    if (path != null && context.mounted) {
-                      context.read<FileListProvider>().openFile(path);
+                        .pickFiles();
+                    if (context.mounted) {
+                      openFilePaths(
+                        context,
+                        context.read<FileListProvider>(),
+                        paths,
+                      );
                     }
                   },
                 ),
@@ -103,18 +211,14 @@ class FileListPanel extends StatelessWidget {
                 IconButton(
                   icon: const Icon(Icons.save, size: 20),
                   tooltip: '保存 (Ctrl+S)',
-                  onPressed: fileList.activeFile != null
-                      ? () => _saveFile(
-                            context,
-                            fileList,
-                            fileList.activeFile!,
-                          )
+                  onPressed: active != null && !active.isReadOnly
+                      ? () => _saveFile(context, fileList, active)
                       : null,
                 ),
               ],
             ),
           ),
-          // 文件列表
+          // 文件列表（可拖拽排序）
           Expanded(
             child: fileList.isEmpty
                 ? const Center(
@@ -123,12 +227,15 @@ class FileListPanel extends StatelessWidget {
                       style: TextStyle(color: Colors.grey),
                     ),
                   )
-                : ListView.builder(
+                : ReorderableListView.builder(
                     itemCount: fileList.files.length,
+                    onReorderItem: (oldIndex, newIndex) =>
+                        fileList.reorderFiles(oldIndex, newIndex),
                     itemBuilder: (context, index) {
                       final file = fileList.files[index];
                       final isActive = file.id == fileList.activeFileId;
                       return _FileListItem(
+                        key: ValueKey(file.id),
                         file: file,
                         isActive: isActive,
                       );
@@ -188,6 +295,7 @@ class FileListPanel extends StatelessWidget {
 /// 文件列表项。
 class _FileListItem extends StatelessWidget {
   const _FileListItem({
+    super.key,
     required this.file,
     required this.isActive,
   });
@@ -223,9 +331,13 @@ class _FileListItem extends StatelessWidget {
                 padding: EdgeInsets.only(right: 6),
                 child: Icon(Icons.circle, size: 8, color: Colors.transparent),
               ),
-            // 文件图标
+            // 文件图标（只读大文件显示锁形）
             Icon(
-              file.isNew ? Icons.description : Icons.insert_drive_file,
+              file.isReadOnly
+                  ? Icons.lock_outline
+                  : file.isNew
+                      ? Icons.description
+                      : Icons.insert_drive_file,
               size: 16,
               color: isActive
                   ? Theme.of(context).colorScheme.primary
@@ -310,10 +422,10 @@ class _FileListItem extends StatelessWidget {
       Offset.zero & overlay.size,
     );
 
-    showMenu(
+    showMenu<String>(
       context: context,
       position: position,
-      items: [
+      items: <PopupMenuEntry<String>>[
         const PopupMenuItem(
           value: 'close',
           child: Row(
@@ -326,7 +438,7 @@ class _FileListItem extends StatelessWidget {
         ),
         PopupMenuItem(
           value: 'save',
-          enabled: file.isDirty,
+          enabled: file.isDirty && !file.isReadOnly,
           child: const Row(
             children: [
               Icon(Icons.save, size: 18),
@@ -335,13 +447,58 @@ class _FileListItem extends StatelessWidget {
             ],
           ),
         ),
-        const PopupMenuItem(
+        PopupMenuItem(
           value: 'saveAs',
-          child: Row(
+          enabled: !file.isReadOnly,
+          child: const Row(
             children: [
               Icon(Icons.save_as, size: 18),
               SizedBox(width: 8),
               Text('另存为'),
+            ],
+          ),
+        ),
+        PopupMenuItem(
+          value: 'rename',
+          enabled: file.filePath != null,
+          child: const Row(
+            children: [
+              Icon(Icons.drive_file_rename_outline, size: 18),
+              SizedBox(width: 8),
+              Text('重命名'),
+            ],
+          ),
+        ),
+        const PopupMenuDivider(),
+        PopupMenuItem(
+          value: 'closeOthers',
+          enabled: fileList.files.length > 1,
+          child: const Row(
+            children: [
+              Icon(Icons.filter_center_focus, size: 18),
+              SizedBox(width: 8),
+              Text('关闭其他'),
+            ],
+          ),
+        ),
+        PopupMenuItem(
+          value: 'closeSaved',
+          enabled: fileList.files.any((f) => !f.isDirty),
+          child: const Row(
+            children: [
+              Icon(Icons.playlist_remove, size: 18),
+              SizedBox(width: 8),
+              Text('关闭已保存'),
+            ],
+          ),
+        ),
+        const PopupMenuItem(
+          value: 'closeAll',
+          child: Row(
+            children: [
+              Icon(Icons.clear_all, size: 18),
+              SizedBox(width: 8),
+              Text('关闭全部'),
             ],
           ),
         ),
@@ -359,7 +516,97 @@ class _FileListItem extends StatelessWidget {
         case 'saveAs':
           _saveFile(context, fileList, file, saveAs: true);
           break;
+        case 'rename':
+          _showRenameDialog(context, fileList);
+          break;
+        case 'closeOthers':
+          _closeFilesWithConfirmation(
+            context,
+            fileList,
+            fileList.files.where((f) => f.id != file.id).toList(),
+          );
+          break;
+        case 'closeSaved':
+          _closeFilesWithConfirmation(
+            context,
+            fileList,
+            fileList.files.where((f) => !f.isDirty).toList(),
+          );
+          break;
+        case 'closeAll':
+          _closeFilesWithConfirmation(
+            context,
+            fileList,
+            fileList.files,
+          );
+          break;
       }
     });
+  }
+
+  /// 显示重命名对话框（仅磁盘文件）。
+  Future<void> _showRenameDialog(
+    BuildContext context,
+    FileListProvider fileList,
+  ) async {
+    final newName = await showDialog<String>(
+      context: context,
+      builder: (_) => _RenameDialog(initialName: file.title),
+    );
+    if (newName == null || !context.mounted) return;
+    try {
+      fileList.renameFile(file.id, newName);
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('重命名失败: $e')),
+        );
+      }
+    }
+  }
+}
+
+/// 重命名对话框。
+class _RenameDialog extends StatefulWidget {
+  const _RenameDialog({required this.initialName});
+
+  /// 预填的当前文件名。
+  final String initialName;
+
+  @override
+  State<_RenameDialog> createState() => _RenameDialogState();
+}
+
+class _RenameDialogState extends State<_RenameDialog> {
+  late final TextEditingController _controller =
+      TextEditingController(text: widget.initialName);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('重命名'),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        decoration: const InputDecoration(labelText: '文件名'),
+        onSubmitted: (value) => Navigator.of(context).pop(value),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(_controller.text),
+          child: const Text('重命名'),
+        ),
+      ],
+    );
   }
 }

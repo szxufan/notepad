@@ -25,6 +25,7 @@ bool FlutterWindow::OnCreate() {
     return false;
   }
   RegisterPlugins(flutter_controller_->engine());
+  SetUpAppChannel();
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
@@ -40,11 +41,54 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  app_channel_ = nullptr;
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }
 
   Win32Window::OnDestroy();
+}
+
+void FlutterWindow::SetUpAppChannel() {
+  app_channel_ =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          flutter_controller_->engine()->messenger(), "notepad/app",
+          &flutter::StandardMethodCodec::GetInstance());
+  app_channel_->SetMethodCallHandler(
+      [this](const flutter::MethodCall<flutter::EncodableValue>& call,
+             std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
+                 result) {
+        if (call.method_name() == "ready") {
+          dart_ready_ = true;
+          for (const auto& files : pending_files_) {
+            SendFilesToDart(files);
+          }
+          pending_files_.clear();
+          result->Success();
+        } else {
+          result->NotImplemented();
+        }
+      });
+}
+
+void FlutterWindow::ForwardFilesToDart(const std::vector<std::string>& paths) {
+  if (!dart_ready_) {
+    pending_files_.push_back(paths);
+    return;
+  }
+  SendFilesToDart(paths);
+}
+
+void FlutterWindow::SendFilesToDart(const std::vector<std::string>& paths) {
+  if (!app_channel_) {
+    return;
+  }
+  flutter::EncodableList list;
+  for (const auto& path : paths) {
+    list.push_back(flutter::EncodableValue(path));
+  }
+  app_channel_->InvokeMethod(
+      "openFiles", std::make_unique<flutter::EncodableValue>(list));
 }
 
 LRESULT

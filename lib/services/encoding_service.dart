@@ -115,6 +115,103 @@ class EncodingService {
     );
   }
 
+  /// 检测截断字节流（大文件预览）的编码并解码。
+  ///
+  /// 仅当尾部确实是不完整的多字节序列，且前文已有对应编码的
+  /// 多字节字符时，才按截断字符容错；完整合法的 GBK 不会被裁成
+  /// ASCII 而误判为 UTF-8，ASCII + Windows-1252 尾字节也保持原检测。
+  EncodingDetection detectAndDecodeTruncated(List<int> bytes) {
+    if (bytes.isEmpty) return detectAndDecode(bytes);
+    // BOM 是明确依据；各 BOM 解码器本身已支持容错/忽略落单尾字节。
+    if (_startsWith(bytes, _utf8Bom) ||
+        _startsWith(bytes, _utf16LeBom) ||
+        _startsWith(bytes, _utf16BeBom)) {
+      return detectAndDecode(bytes);
+    }
+    try {
+      return EncodingDetection(utf8Name, utf8.decode(bytes));
+    } catch (_) {
+      // 继续检查是否仅末尾的 UTF-8 字符被截断。
+    }
+    for (var trim = 1; trim <= 3 && trim < bytes.length; trim++) {
+      final end = bytes.length - trim;
+      if (!_isIncompleteUtf8Tail(bytes.sublist(end))) continue;
+      final sample = bytes.sublist(0, end);
+      try {
+        final prefix = utf8.decode(sample);
+        // 纯 ASCII + 一个高位尾字节也可能是 Windows-1252；没有
+        // 其他 UTF-8 多字节字符作依据时保留常规检测管线的结果。
+        if (prefix.codeUnits.any((unit) => unit > 0x7F)) {
+          return EncodingDetection(
+            utf8Name,
+            utf8.decode(bytes, allowMalformed: true),
+          );
+        }
+      } catch (_) {
+        // 截断尾字节之前的正文不是合法 UTF-8。
+      }
+    }
+    // 完整合法的 GBK 必须先于“去掉末尾一字节”的截断判断。
+    try {
+      return EncodingDetection(gbkName, gbk.decode(bytes));
+    } catch (_) {
+      // 继续检查 GBK 是否仅切断最后一个双字节字符。
+    }
+    if (bytes.length > 1 && _isGbkLeadByte(bytes.last)) {
+      final sample = bytes.sublist(0, bytes.length - 1);
+      // 与 UTF-8 相同，要求前文已有非 ASCII 内容，避免把单个
+      // Windows-1252 高位字节误当作 GBK 的首字节。
+      if (sample.any((byte) => byte > 0x7F)) {
+        try {
+          gbk.decode(sample);
+          return EncodingDetection(
+            gbkName,
+            gbk.decode(bytes, allowMalformed: true),
+          );
+        } catch (_) {
+          // 正文不是合法 GBK，走常规兜底。
+        }
+      }
+    }
+    return detectAndDecode(bytes);
+  }
+
+  /// 判断 [tail] 是否为合法 UTF-8 多字节字符的不完整前缀。
+  static bool _isIncompleteUtf8Tail(List<int> tail) {
+    if (tail.isEmpty || tail.length > 3) return false;
+    final first = tail[0];
+    final expectedLength = first >= 0xC2 && first <= 0xDF
+        ? 2
+        : first >= 0xE0 && first <= 0xEF
+            ? 3
+            : first >= 0xF0 && first <= 0xF4
+                ? 4
+                : 0;
+    if (expectedLength == 0 || tail.length >= expectedLength) return false;
+    for (var i = 1; i < tail.length; i++) {
+      final byte = tail[i];
+      if (i == 1) {
+        final min = first == 0xE0
+            ? 0xA0
+            : first == 0xF0
+                ? 0x90
+                : 0x80;
+        final max = first == 0xED
+            ? 0x9F
+            : first == 0xF4
+                ? 0x8F
+                : 0xBF;
+        if (byte < min || byte > max) return false;
+      } else if (byte < 0x80 || byte > 0xBF) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /// 是否为 GBK 双字节字符的首字节。
+  static bool _isGbkLeadByte(int byte) => byte >= 0x81 && byte <= 0xFE;
+
   /// 按指定编码解码字节内容。
   ///
   /// 用于手动切换编码与外部修改重载。容错解码：

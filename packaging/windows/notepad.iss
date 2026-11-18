@@ -24,6 +24,7 @@ WizardStyle=modern
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
 UninstallDisplayIcon={app}\{#AppExeName}
+ChangesAssociations=yes
 
 [Languages]
 Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
@@ -31,6 +32,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+Name: "fileassoc"; Description: "将 .txt 文件关联到 Notepad"; GroupDescription: "文件关联:"; Flags: unchecked
 
 [Files]
 Source: "..\..\build\windows\x64\runner\Release\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -41,6 +43,16 @@ Source: "vc_redist.x64.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"
 Name: "{group}\{cm:UninstallProgram,{#AppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
+
+[Registry]
+; 「打开方式」菜单注册（始终执行，不改变现有默认关联）
+Root: HKCR; Subkey: "Applications\{#AppExeName}"; ValueType: string; ValueName: ""; ValueData: "{#AppName}"; Flags: uninsdeletekey
+Root: HKCR; Subkey: "Applications\{#AppExeName}\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExeName}"" ""%1"""
+; .txt 默认关联（可选任务，卸载时清除默认值回退系统处理）
+Root: HKCR; Subkey: ".txt"; ValueType: string; ValueName: ""; ValueData: "Notepad.txt"; Tasks: fileassoc; Flags: uninsclearvalue
+Root: HKCR; Subkey: "Notepad.txt"; ValueType: string; ValueName: ""; ValueData: "文本文档"; Tasks: fileassoc; Flags: uninsdeletekey
+Root: HKCR; Subkey: "Notepad.txt\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#AppExeName},0"; Tasks: fileassoc
+Root: HKCR; Subkey: "Notepad.txt\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExeName}"" ""%1"""; Tasks: fileassoc
 
 [Run]
 ; 目标机器缺少 VC++ 运行库时静默安装（已装则跳过）

@@ -9,6 +9,7 @@ import 'dart:io';
 
 import '../models/note_file.dart';
 import 'encoding_service.dart';
+import 'file_service.dart';
 
 /// 上次成功读取的磁盘状态。
 class _DiskSnapshot {
@@ -22,11 +23,17 @@ class _DiskSnapshot {
 class FileWatchService {
   FileWatchService({
     required this.encodingService,
+    FileService? fileService,
     Future<List<int>> Function(String path)? readBytes,
-  }) : _readBytes = readBytes ?? ((path) => File(path).readAsBytes());
+  })  : _fileService =
+            fileService ?? FileService(encodingService: encodingService),
+        _readBytes = readBytes ?? ((path) => File(path).readAsBytes());
 
   /// 编码服务（按文件编码解码磁盘内容用于比对）。
   final EncodingService encodingService;
+
+  /// 大小阈值来源，防止已打开文件增大后仍被全量读取。
+  final FileService _fileService;
 
   /// 磁盘字节读取入口，注入后可模拟临时读取失败。
   final Future<List<int>> Function(String path) _readBytes;
@@ -44,6 +51,12 @@ class FileWatchService {
 
   /// 文件被外部删除时的回调（同一次删除只触发一次）。
   void Function(NoteFile file)? onFileDeleted;
+
+  /// 已打开文件增大到只读阈值以上时的回调（连续超限只通知一次）。
+  void Function(NoteFile file, int sizeBytes)? onFileTooLarge;
+
+  /// 已连续超限并通知过的文件。
+  final Set<String> _oversizedFileIds = {};
 
   /// 各文件上次成功处理的磁盘快照。
   final Map<String, _DiskSnapshot> _snapshots = {};
@@ -81,6 +94,7 @@ class FileWatchService {
     _timer = null;
     _getFiles = null;
     _snapshots.clear();
+    _oversizedFileIds.clear();
   }
 
   /// 立即执行一次检查（定时器回调调用，测试可直接调用）。
@@ -94,9 +108,12 @@ class FileWatchService {
       // 清理已关闭文件的记录
       final ids = files.map((f) => f.id).toSet();
       _snapshots.removeWhere((id, _) => !ids.contains(id));
+      _oversizedFileIds.removeWhere((id) => !ids.contains(id));
       for (final file in files) {
         final path = file.filePath;
         if (path == null) continue;
+        // 只读大文件跳过轮询，避免每 3 秒全量读取大文件
+        if (file.isReadOnly) continue;
         await _checkFile(file, path);
       }
     } finally {
@@ -107,22 +124,33 @@ class FileWatchService {
   /// 检查单个文件的磁盘状态。
   Future<void> _checkFile(NoteFile file, String path) async {
     final previous = _snapshots[file.id];
-    late DateTime? modified;
+    late FileStat stat;
     try {
-      modified = _statModified(path);
+      stat = FileStat.statSync(path);
     } catch (e) {
       // 状态读取失败不能当作文件删除，保留快照等待下次重试。
       stderr.writeln('监听文件状态读取失败: $e');
       return;
     }
-    if (modified == null) {
+    if (stat.type == FileSystemEntityType.notFound) {
       // 文件消失：仅此前存在时通知一次
+      _oversizedFileIds.remove(file.id);
       _snapshots[file.id] = const _DiskSnapshot(modified: null, content: null);
       if (previous?.modified != null) {
         onFileDeleted?.call(file);
       }
       return;
     }
+    final modified = stat.modified;
+    if (stat.size > _fileService.readOnlyThresholdBytes) {
+      // 初次打开后文件可能增长到数十 MB。保留当前内存内容并暂停
+      // 自动重载，由界面提示用户关闭后重新以只读预览打开。
+      if (_oversizedFileIds.add(file.id)) {
+        onFileTooLarge?.call(file, stat.size);
+      }
+      return;
+    }
+    _oversizedFileIds.remove(file.id);
 
     late String diskText;
     try {

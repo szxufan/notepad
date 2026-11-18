@@ -181,6 +181,35 @@ void main() {
       expect(changedContents, ['外部新内容']);
     });
 
+    test('已打开文件增大超过阈值后不应全量读取且只提示一次', () async {
+      fileService = FileService(readOnlyThresholdBytes: 5, maxFileBytes: 20);
+      var readCount = 0;
+      watchService = FileWatchService(
+        encodingService: const EncodingService(),
+        fileService: fileService,
+        readBytes: (path) async {
+          readCount++;
+          return File(path).readAsBytes();
+        },
+      );
+      watchService.onExternalChange = (file, content) {
+        changedIds.add(file.id);
+        changedContents.add(content);
+      };
+      final oversizedIds = <String>[];
+      watchService.onFileTooLarge = (file, size) => oversizedIds.add(file.id);
+      final file = openTempFile('grown.txt', 'aa');
+      watchService.start(() => files);
+
+      modifyOnDisk(file, '0123456789');
+      await watchService.checkNow();
+      await watchService.checkNow();
+
+      expect(readCount, 0);
+      expect(changedIds, isEmpty);
+      expect(oversizedIds, [file.id]);
+    });
+
     test('GBK 文件外部修改应按文件编码解码', () async {
       final path = '${tempDir.path}/gbk.txt';
       // '中文' 的 GBK 字节

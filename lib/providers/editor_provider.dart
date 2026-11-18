@@ -49,6 +49,11 @@ class EditorProvider extends ChangeNotifier {
   /// 字体大小调节步长。
   static const double fontSizeStep = 1.0;
 
+  /// 单文件匹配数量上限。
+  ///
+  /// 防止大文件搜索产生海量匹配导致高亮卡顿/内存溢出，超出部分不再高亮。
+  static const int maxMatchesPerFile = 1000;
+
   /// 当前字体大小。
   double _fontSize = defaultFontSize;
 
@@ -256,6 +261,7 @@ class EditorProvider extends ChangeNotifier {
       final index = _currentContent.indexOf(_findText, start);
       if (index < 0) break;
       matches.add(TextRange(start: index, end: index + _findText.length));
+      if (matches.length >= maxMatchesPerFile) break;
       start = index + _findText.length;
       // 避免空字符串无限循环
       if (_findText.isEmpty) break;
@@ -270,6 +276,7 @@ class EditorProvider extends ChangeNotifier {
       final regex = RegExp(_findText);
       for (final match in regex.allMatches(_currentContent)) {
         matches.add(TextRange(start: match.start, end: match.end));
+        if (matches.length >= maxMatchesPerFile) break;
       }
     } on FormatException catch (e) {
       // 正则不合法：视为无匹配，记录错误信息
@@ -469,6 +476,7 @@ class EditorProvider extends ChangeNotifier {
         final regex = RegExp(query);
         return regex
             .allMatches(content)
+            .take(maxMatchesPerFile)
             .map((m) => TextRange(start: m.start, end: m.end))
             .toList();
       } on FormatException catch (e) {
@@ -482,6 +490,7 @@ class EditorProvider extends ChangeNotifier {
       final index = content.indexOf(query, start);
       if (index < 0) break;
       matches.add(TextRange(start: index, end: index + query.length));
+      if (matches.length >= maxMatchesPerFile) break;
       start = index + query.length;
       if (query.isEmpty) break;
     }

@@ -78,6 +78,30 @@ void main() {
       expect(result.encodingName, EncodingService.windows1252Name);
       expect(result.text, 'é');
     });
+
+    test('截断检测不应把完整 GBK 尾字符裁成 ASCII', () {
+      final result = service.detectAndDecodeTruncated([0x41, 0xD6, 0xD0]);
+
+      expect(result.encodingName, EncodingService.gbkName);
+      expect(result.text, 'A中');
+    });
+
+    test('截断检测不应把 Windows-1252 尾字节当作 UTF-8 前缀', () {
+      final result = service.detectAndDecodeTruncated([0x41, 0xE9]);
+
+      expect(result.encodingName, EncodingService.windows1252Name);
+      expect(result.text, 'Aé');
+    });
+
+    test('截断检测应容错解码正文已有字符的 UTF-8 尾部', () {
+      final bytes = utf8.encode('中文测试');
+      final result = service.detectAndDecodeTruncated(
+        bytes.sublist(0, bytes.length - 1),
+      );
+
+      expect(result.encodingName, EncodingService.utf8Name);
+      expect(result.text, startsWith('中文测'));
+    });
   });
 
   group('EncodingService 编解码往返', () {

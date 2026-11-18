@@ -3,6 +3,7 @@
 #include <windows.h>
 
 #include "flutter_window.h"
+#include "single_instance.h"
 #include "utils.h"
 
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
@@ -17,10 +18,20 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   // plugins.
   ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 
-  flutter::DartProject project(L"data");
+  std::vector<std::string> command_line_arguments = GetCommandLineArguments();
 
-  std::vector<std::string> command_line_arguments =
-      GetCommandLineArguments();
+  // Single instance: a second launch forwards its file arguments to the
+  // first instance and exits without creating a window.
+  SingleInstance single_instance;
+  if (!single_instance.Acquire() &&
+      single_instance.ForwardToFirstInstance(command_line_arguments)) {
+    ::CoUninitialize();
+    return EXIT_SUCCESS;
+  }
+  // If forwarding fails, continue normal startup rather than silently
+  // dropping the command-line files.
+
+  flutter::DartProject project(L"data");
 
   project.set_dart_entrypoint_arguments(std::move(command_line_arguments));
 
@@ -31,6 +42,13 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
     return EXIT_FAILURE;
   }
   window.SetQuitOnClose(true);
+
+  // Receive file paths forwarded by subsequent launches.
+  single_instance.CreateMessageWindow(
+      window.GetHandle(),
+      [&window](const std::vector<std::string>& files) {
+        window.ForwardFilesToDart(files);
+      });
 
   ::MSG msg;
   while (::GetMessage(&msg, nullptr, 0, 0)) {

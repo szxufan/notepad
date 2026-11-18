@@ -46,6 +46,8 @@ class _FindReplaceBarState extends State<FindReplaceBar> {
   @override
   Widget build(BuildContext context) {
     final editor = context.watch<EditorProvider>();
+    final isReadOnly =
+        context.watch<FileListProvider>().activeFile?.isReadOnly ?? false;
     // 同步控制器文本
     if (_findController.text != editor.findText) {
       _findController.text = editor.findText;
@@ -196,7 +198,7 @@ class _FindReplaceBarState extends State<FindReplaceBar> {
               ),
               const SizedBox(width: 8),
               TextButton(
-                onPressed: matchCount > 0
+                onPressed: matchCount > 0 && !isReadOnly
                     ? () {
                         final newContent = editor.replace();
                         _onReplaced(newContent);
@@ -205,7 +207,7 @@ class _FindReplaceBarState extends State<FindReplaceBar> {
                 child: const Text('替换'),
               ),
               TextButton(
-                onPressed: editor.findText.isNotEmpty
+                onPressed: editor.findText.isNotEmpty && !isReadOnly
                     ? () {
                         final newContent = editor.replaceAll();
                         _onReplaced(newContent);

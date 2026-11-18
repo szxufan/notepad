@@ -196,6 +196,12 @@ class _EditorPanelState extends State<EditorPanel> {
     final editor = context.read<EditorProvider>();
     final activeFile = fileList.activeFile;
     if (activeFile == null || activeFile.id != fileId) return;
+    if (activeFile.isReadOnly) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('只读文件不能修改')),
+      );
+      return;
+    }
     // 陈旧守卫：弹窗期间内容若变化（如外部修改自动重载），偏移不再可靠
     if (activeFile.content != contentAtInvocation) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -299,31 +305,59 @@ class _EditorPanelState extends State<EditorPanel> {
       onPointerSignal: (event) {
         _handlePointerSignal(event);
       },
-      child: Container(
-        color: Theme.of(context).scaffoldBackgroundColor,
-        child: TextField(
-          controller: _controller,
-          // 仅在用户编辑时同步内容（程序化改文本不会触发 onChanged）
-          onChanged: (_) {
-            _onContentChanged();
-          },
-          contextMenuBuilder: _buildContextMenu,
-          expands: true,
-          maxLines: null,
-          minLines: null,
-          textAlignVertical: TextAlignVertical.top,
-          style: TextStyle(
-            fontFamily: _monospaceFontFamily,
-            fontSize: editor.fontSize,
-            height: 1.5,
+      child: Column(
+        children: [
+          // 只读大文件横幅
+          if (activeFile.isReadOnly)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+              color: Theme.of(context).colorScheme.surfaceContainerHighest,
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.lock_outline,
+                    size: 14,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    '大文件 · 只读模式，仅显示开头部分，不可编辑或保存',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
+              ),
+            ),
+          Expanded(
+            child: Container(
+              color: Theme.of(context).scaffoldBackgroundColor,
+              child: TextField(
+                controller: _controller,
+                readOnly: activeFile.isReadOnly,
+                // 仅在用户编辑时同步内容（程序化改文本不会触发 onChanged）
+                onChanged: (_) {
+                  _onContentChanged();
+                },
+                contextMenuBuilder: _buildContextMenu,
+                expands: true,
+                maxLines: null,
+                minLines: null,
+                textAlignVertical: TextAlignVertical.top,
+                style: TextStyle(
+                  fontFamily: _monospaceFontFamily,
+                  fontSize: editor.fontSize,
+                  height: 1.5,
+                ),
+                decoration: const InputDecoration(
+                  contentPadding: EdgeInsets.all(16),
+                  border: InputBorder.none,
+                  isDense: false,
+                ),
+                cursorColor: Theme.of(context).colorScheme.primary,
+              ),
+            ),
           ),
-          decoration: const InputDecoration(
-            contentPadding: EdgeInsets.all(16),
-            border: InputBorder.none,
-            isDense: false,
-          ),
-          cursorColor: Theme.of(context).colorScheme.primary,
-        ),
+        ],
       ),
     );
   }

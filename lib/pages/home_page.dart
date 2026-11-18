@@ -4,9 +4,13 @@
 /// 集成快捷键绑定。
 library pages.home_page;
 
+import 'dart:async';
+
 import 'package:desktop_drop/desktop_drop.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:path/path.dart' as p;
 import 'package:provider/provider.dart';
 
 import '../models/note_file.dart';
@@ -23,7 +27,10 @@ import '../widgets/status_bar.dart';
 
 /// 主页面。
 class HomePage extends StatefulWidget {
-  const HomePage({super.key});
+  const HomePage({super.key, this.startupFiles = const []});
+
+  /// 命令行传入的待打开文件路径（启动时处理）。
+  final List<String> startupFiles;
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -49,11 +56,16 @@ class _HomePageState extends State<HomePage> {
     _fileWatchService = context.read<FileWatchService>();
     _fileWatchService.onExternalChange = _onExternalChange;
     _fileWatchService.onFileDeleted = _onFileDeleted;
+    _fileWatchService.onFileTooLarge = _onFileTooLarge;
     // 启动自动保存草稿与外部修改监听
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final fileList = context.read<FileListProvider>();
       _draftService.startAutoSave(() async => fileList.allFiles);
       _fileWatchService.start(() => fileList.allFiles);
+      _registerAppChannel();
+      if (widget.startupFiles.isNotEmpty) {
+        _openNormalizedPaths(widget.startupFiles);
+      }
     });
   }
 
@@ -62,7 +74,37 @@ class _HomePageState extends State<HomePage> {
     // 停止自动保存与监听
     _draftService.stopAutoSave();
     _fileWatchService.stop();
+    const MethodChannel('notepad/app').setMethodCallHandler(null);
     super.dispose();
+  }
+
+  /// 注册原生侧文件转发通道（Windows 单实例第二次启动时转发路径）。
+  void _registerAppChannel() {
+    if (defaultTargetPlatform != TargetPlatform.windows) return;
+    const channel = MethodChannel('notepad/app');
+    channel.setMethodCallHandler((call) async {
+      if (call.method == 'openFiles' && mounted) {
+        final paths = (call.arguments as List).cast<String>();
+        _openNormalizedPaths(paths);
+      }
+    });
+    // 通知原生侧 Dart 处理器已就绪，冲刷排队的转发请求。
+    // Widget 测试或未注册原生通道的环境中不应产生未处理异步异常。
+    unawaited(
+      channel.invokeMethod<void>('ready').onError<MissingPluginException>(
+            (error, stack) {},
+          ),
+    );
+  }
+
+  /// 规范化路径（相对转绝对、Windows 大小写归一）后逐个打开。
+  void _openNormalizedPaths(List<String> paths) {
+    final fileList = context.read<FileListProvider>();
+    final normalized = paths
+        .where((path) => path.isNotEmpty)
+        .map((path) => p.canonicalize(path))
+        .toList();
+    openFilePaths(context, fileList, normalized);
   }
 
   /// 文件被外部修改：无本地修改时静默重载，有修改时询问用户。
@@ -109,6 +151,22 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
+  /// 已打开文件增长到只读阈值以上：保留当前内容并提示重新打开。
+  void _onFileTooLarge(NoteFile file, int sizeBytes) {
+    if (!mounted) return;
+    final current = context.read<FileListProvider>().getFile(file.id);
+    if (current == null) return;
+    final sizeMB = (sizeBytes / 1024 / 1024).toStringAsFixed(1);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          '${current.title} 已增大到 $sizeMB MB，已暂停自动重载；'
+          '如需查看新内容，请关闭后重新打开',
+        ),
+      ),
+    );
+  }
+
   /// 文件被外部删除：提示一次，内容保留在内存中。
   void _onFileDeleted(NoteFile file) {
     if (!mounted) return;
@@ -124,11 +182,12 @@ class _HomePageState extends State<HomePage> {
     context.read<FileListProvider>().addNewFile();
   }
 
-  /// 打开文件
+  /// 打开文件（支持多选）
   Future<void> _openFile() async {
-    final path = await context.read<FileListProvider>().fileService.pickFile();
-    if (path != null && mounted) {
-      context.read<FileListProvider>().openFile(path);
+    final fileList = context.read<FileListProvider>();
+    final paths = await fileList.fileService.pickFiles();
+    if (mounted) {
+      openFilePaths(context, fileList, paths);
     }
   }
 
@@ -144,6 +203,14 @@ class _HomePageState extends State<HomePage> {
     final fileList = context.read<FileListProvider>();
     final file = fileList.getFile(id);
     if (file == null) return false;
+    if (file.isReadOnly) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('只读文件不能保存')),
+        );
+      }
+      return false;
+    }
     try {
       if (saveAs || file.filePath == null) {
         return await fileList.saveFileAs(id);
@@ -376,12 +443,11 @@ class _HomePageState extends State<HomePage> {
           onDragDone: (detail) {
             setState(() => _isDragging = false);
             final fileList = context.read<FileListProvider>();
-            for (final xFile in detail.files) {
-              final path = xFile.path;
-              if (path.isNotEmpty) {
-                fileList.openFile(path);
-              }
-            }
+            openFilePaths(
+              context,
+              fileList,
+              detail.files.map((f) => f.path).toList(),
+            );
           },
           child: Stack(
             children: [
