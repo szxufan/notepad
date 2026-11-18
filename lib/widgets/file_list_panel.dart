@@ -12,6 +12,31 @@ import '../providers/file_list_provider.dart';
 import '../services/ai_title_service.dart';
 import 'ai_settings_dialog.dart';
 
+/// 保存文件，失败时提示（如编码无法表示内容）。
+///
+/// 仅在确实写入文件后返回 true；用户取消或保存失败均返回 false。
+Future<bool> _saveFile(
+  BuildContext context,
+  FileListProvider fileList,
+  NoteFile file, {
+  bool saveAs = false,
+}) async {
+  try {
+    if (saveAs || file.filePath == null) {
+      return await fileList.saveFileAs(file.id);
+    }
+    await fileList.saveFile(file.id);
+    return true;
+  } catch (e) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('保存失败: $e')),
+      );
+    }
+    return false;
+  }
+}
+
 /// 左侧文件列表面板。
 class FileListPanel extends StatelessWidget {
   const FileListPanel({super.key});
@@ -79,14 +104,11 @@ class FileListPanel extends StatelessWidget {
                   icon: const Icon(Icons.save, size: 20),
                   tooltip: '保存 (Ctrl+S)',
                   onPressed: fileList.activeFile != null
-                      ? () {
-                          final active = fileList.activeFile!;
-                          if (active.filePath != null) {
-                            fileList.saveFile(active.id);
-                          } else {
-                            fileList.saveFileAs(active.id);
-                          }
-                        }
+                      ? () => _saveFile(
+                            context,
+                            fileList,
+                            fileList.activeFile!,
+                          )
                       : null,
                 ),
               ],
@@ -121,9 +143,8 @@ class FileListPanel extends StatelessWidget {
   /// 构建 AI 生成标题按钮。
   Widget _buildAiTitleButton(BuildContext context, FileListProvider fileList) {
     final active = fileList.activeFile;
-    final canGenerate = active != null &&
-        active.isNew &&
-        active.content.trim().isNotEmpty;
+    final canGenerate =
+        active != null && active.isNew && active.content.trim().isNotEmpty;
     final generating =
         active != null && fileList.isAiTitleGenerating(active.id);
 
@@ -257,12 +278,8 @@ class _FileListItem extends StatelessWidget {
               TextButton(
                 onPressed: () async {
                   Navigator.of(dialogContext).pop();
-                  if (file.filePath != null) {
-                    await fileList.saveFile(file.id);
-                  } else {
-                    await fileList.saveFileAs(file.id);
-                  }
-                  if (context.mounted) {
+                  final saved = await _saveFile(context, fileList, file);
+                  if (saved && context.mounted) {
                     fileList.closeFile(file.id);
                   }
                 },
@@ -337,14 +354,10 @@ class _FileListItem extends StatelessWidget {
           _closeFile(context, fileList);
           break;
         case 'save':
-          if (file.filePath != null) {
-            fileList.saveFile(file.id);
-          } else {
-            fileList.saveFileAs(file.id);
-          }
+          _saveFile(context, fileList, file);
           break;
         case 'saveAs':
-          fileList.saveFileAs(file.id);
+          _saveFile(context, fileList, file, saveAs: true);
           break;
       }
     });

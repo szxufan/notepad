@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:notepad/models/note_file.dart';
 import 'package:notepad/services/draft_service.dart';
+import 'package:notepad/services/encoding_service.dart';
 
 void main() {
   late Directory tempDir;
@@ -89,6 +90,47 @@ void main() {
       expect(loaded.length, 1);
       expect(loaded[0].content, '草稿内容（未保存）');
       expect(loaded[0].isDirty, true);
+    });
+
+    test('磁盘较新的 GBK 文件应按编码读取且不影响其他草稿', () async {
+      const encodingService = EncodingService();
+      final diskPath = '${tempDir.path}/gbk_draft.txt';
+      final oldTime = DateTime.now().subtract(const Duration(days: 1));
+      final diskFile = File(diskPath);
+      diskFile.writeAsBytesSync(
+        encodingService.encode('磁盘新中文内容', EncodingService.gbkName),
+      );
+      diskFile.setLastModifiedSync(DateTime.now());
+
+      final gbkDraft = NoteFile(
+        id: 'gbk-file',
+        title: 'gbk_draft.txt',
+        filePath: diskPath,
+        content: '旧内容',
+        diskContent: '旧内容',
+        isDirty: false,
+        lastModified: oldTime,
+        lastSavedAt: oldTime,
+        encoding: EncodingService.gbkName,
+      );
+      final unsavedDraft = NoteFile(
+        id: 'unsaved-file',
+        title: '未保存',
+        content: '不能丢失的草稿',
+        isDirty: true,
+        lastModified: DateTime.now(),
+        isNew: true,
+      );
+
+      await draftService.saveDrafts([gbkDraft, unsavedDraft]);
+      final loaded = await draftService.loadDrafts();
+
+      expect(loaded, hasLength(2));
+      expect(loaded[0].content, '磁盘新中文内容');
+      expect(loaded[0].diskContent, '磁盘新中文内容');
+      expect(loaded[0].encoding, EncodingService.gbkName);
+      expect(loaded[1].content, '不能丢失的草稿');
+      expect(loaded[1].isDirty, true);
     });
 
     test('clearDrafts 应删除草稿文件', () async {

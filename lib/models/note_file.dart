@@ -45,6 +45,11 @@ class NoteFile {
   /// 标题是否已锁定（内容超过 64 字后不再跟随首行变化）。
   bool isTitleLocked;
 
+  /// 文件编码名（如 'UTF-8'、'GBK'、'UTF-16 LE'）。
+  ///
+  /// 打开时自动检测，保存时沿用；新建文件默认 UTF-8。
+  String encoding;
+
   /// 创建 [NoteFile] 实例。
   NoteFile({
     required this.id,
@@ -58,10 +63,16 @@ class NoteFile {
     this.isNew = false,
     this.hasAiTitle = false,
     this.isTitleLocked = false,
+    this.encoding = 'UTF-8',
   });
 
   /// 从磁盘文件创建 [NoteFile]。
-  factory NoteFile.fromDisk(String id, String path, String content) {
+  factory NoteFile.fromDisk(
+    String id,
+    String path,
+    String content, {
+    String encoding = 'UTF-8',
+  }) {
     final stat = FileStat.statSync(path);
     return NoteFile(
       id: id,
@@ -73,6 +84,7 @@ class NoteFile {
       lastModified: stat.modified,
       lastSavedAt: stat.modified,
       isNew: false,
+      encoding: encoding,
     );
   }
 
@@ -90,6 +102,7 @@ class NoteFile {
           ? DateTime.parse(json['lastSavedAt'] as String)
           : null,
       isNew: json['isNew'] as bool? ?? false,
+      encoding: json['encoding'] as String? ?? 'UTF-8',
     );
   }
 
@@ -105,6 +118,7 @@ class NoteFile {
       'lastModified': lastModified.toIso8601String(),
       'lastSavedAt': lastSavedAt?.toIso8601String(),
       'isNew': isNew,
+      'encoding': encoding,
     };
   }
 
@@ -121,6 +135,7 @@ class NoteFile {
     bool? isNew,
     bool? hasAiTitle,
     bool? isTitleLocked,
+    String? encoding,
   }) {
     return NoteFile(
       id: id ?? this.id,
@@ -134,6 +149,7 @@ class NoteFile {
       isNew: isNew ?? this.isNew,
       hasAiTitle: hasAiTitle ?? this.hasAiTitle,
       isTitleLocked: isTitleLocked ?? this.isTitleLocked,
+      encoding: encoding ?? this.encoding,
     );
   }
 

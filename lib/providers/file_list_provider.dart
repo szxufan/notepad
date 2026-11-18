@@ -295,4 +295,59 @@ class FileListProvider extends ChangeNotifier {
     }
     notifyListeners();
   }
+
+  /// 用外部修改后的磁盘内容重载文件。
+  ///
+  /// 更新内容与磁盘快照，清除未保存状态。
+  void applyExternalReload(String id, String newDiskContent) {
+    final index = _files.indexWhere((f) => f.id == id);
+    if (index < 0) return;
+    final now = DateTime.now();
+    _files[index] = _files[index].copyWith(
+      content: newDiskContent,
+      diskContent: newDiskContent,
+      isDirty: false,
+      lastModified: now,
+      lastSavedAt: now,
+    );
+    notifyListeners();
+  }
+
+  /// 仅更改文件的保存编码（不重读磁盘内容）。
+  ///
+  /// 用于保存失败后转为 UTF-8 等场景，保留本地编辑内容。
+  void setSaveEncoding(String id, String encodingName) {
+    final index = _files.indexWhere((f) => f.id == id);
+    if (index < 0) return;
+    _files[index] = _files[index].copyWith(encoding: encodingName);
+    notifyListeners();
+  }
+
+  /// 切换文件编码。
+  ///
+  /// 有磁盘路径的文件：重读磁盘并按新编码解码，内容与快照同步更新
+  /// （会丢弃本地未保存修改，调用方应先确认）。
+  /// 未保存的新文件：仅更改保存时的目标编码。
+  /// 读取失败时抛出 [FileSystemException]。
+  Future<void> switchEncoding(String id, String encodingName) async {
+    final index = _files.indexWhere((f) => f.id == id);
+    if (index < 0) return;
+    final file = _files[index];
+    if (file.filePath == null) {
+      setSaveEncoding(id, encodingName);
+      return;
+    }
+    final text =
+        fileService.readFileWithEncoding(file.filePath!, encodingName);
+    final stat = FileStat.statSync(file.filePath!);
+    _files[index] = file.copyWith(
+      content: text,
+      diskContent: text,
+      encoding: encodingName,
+      isDirty: false,
+      lastModified: stat.modified,
+      lastSavedAt: stat.modified,
+    );
+    notifyListeners();
+  }
 }

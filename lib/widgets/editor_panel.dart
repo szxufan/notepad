@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
+import '../providers/cursor_provider.dart';
 import '../providers/editor_provider.dart';
 import '../providers/file_list_provider.dart';
 import 'highlighting_controller.dart';
@@ -68,13 +69,20 @@ class _EditorPanelState extends State<EditorPanel> {
 
     // 仅当活动文件真正变化时才更新 EditorProvider，
     // 避免每次重建都重置当前匹配索引
-    if (editor.currentFileId != activeFile?.id) {
+    final activeFileChanged = editor.currentFileId != activeFile?.id;
+    if (activeFileChanged) {
       editor.setActiveFile(activeFile);
     }
 
-    // 同步控制器文本
-    if (_controller.text != (activeFile?.content ?? '')) {
-      _controller.text = activeFile?.content ?? '';
+    final content = activeFile?.content ?? '';
+    if (activeFileChanged) {
+      // 即使两个文件内容相同，也要清除上一文件的光标与选区。
+      _controller.value = TextEditingValue(
+        text: content,
+        selection: const TextSelection.collapsed(offset: 0),
+      );
+    } else if (_controller.text != content) {
+      _controller.text = content;
     }
 
     // 延迟到帧后更新高亮，避免在 build 阶段触发 notifyListeners
@@ -85,7 +93,7 @@ class _EditorPanelState extends State<EditorPanel> {
     });
   }
 
-  /// 将编辑器选中文本同步到 EditorProvider。
+  /// 将编辑器选中文本同步到 EditorProvider，光标位置同步到 CursorProvider。
   ///
   /// 跨行选区整段同步（含换行符），无有效选区时同步空字符串。
   void _syncSelectedText() {
@@ -95,6 +103,7 @@ class _EditorPanelState extends State<EditorPanel> {
         ? selection.textInside(_controller.text)
         : '';
     context.read<EditorProvider>().setSelectedText(text);
+    context.read<CursorProvider>().update(selection, _controller.text);
   }
 
   /// 更新高亮显示。

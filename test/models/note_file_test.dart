@@ -27,6 +27,8 @@ void main() {
       expect(note.lastModified, DateTime.parse('2024-01-01T00:00:00.000'));
       expect(note.lastSavedAt, DateTime.parse('2024-01-02T00:00:00.000'));
       expect(note.isNew, false);
+      // 旧草稿无 encoding 字段应回退 UTF-8
+      expect(note.encoding, 'UTF-8');
     });
 
     test('toJson 应正确序列化', () {
@@ -40,6 +42,7 @@ void main() {
         lastModified: DateTime.parse('2024-01-01T00:00:00.000'),
         lastSavedAt: DateTime.parse('2024-01-02T00:00:00.000'),
         isNew: false,
+        encoding: 'GBK',
       );
 
       final json = note.toJson();
@@ -53,6 +56,7 @@ void main() {
       expect(json['lastModified'], '2024-01-01T00:00:00.000');
       expect(json['lastSavedAt'], '2024-01-02T00:00:00.000');
       expect(json['isNew'], false);
+      expect(json['encoding'], 'GBK');
     });
 
     test('fromJson/toJson 应可往返转换', () {
@@ -64,6 +68,7 @@ void main() {
         isDirty: true,
         lastModified: DateTime.parse('2024-03-01T12:00:00.000'),
         isNew: true,
+        encoding: 'UTF-16 LE',
       );
 
       final json = original.toJson();
@@ -76,6 +81,7 @@ void main() {
       expect(restored.isDirty, original.isDirty);
       expect(restored.lastModified, original.lastModified);
       expect(restored.isNew, original.isNew);
+      expect(restored.encoding, original.encoding);
     });
 
     test('copyWith 应正确复制并覆盖字段', () {
@@ -90,12 +96,15 @@ void main() {
       final copied = note.copyWith(
         content: '新内容',
         isDirty: true,
+        encoding: 'GBK',
       );
 
       expect(copied.id, 'original');
       expect(copied.title, '原.txt');
       expect(copied.content, '新内容');
       expect(copied.isDirty, true);
+      expect(copied.encoding, 'GBK');
+      expect(note.encoding, 'UTF-8');
     });
 
     test('相等性应基于 id', () {

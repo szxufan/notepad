@@ -26,4 +26,5 @@ doc/api/
 # IDE 与 AI 助手本地文件（含本机路径，勿公开）
 .idea/
 .trae/
+.zcode/
 *.iml

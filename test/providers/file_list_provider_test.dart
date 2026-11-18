@@ -1,9 +1,12 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:notepad/models/ai_config.dart';
 import 'package:notepad/models/note_file.dart';
 import 'package:notepad/providers/file_list_provider.dart';
 import 'package:notepad/services/ai_title_service.dart';
+import 'package:notepad/services/encoding_service.dart';
 import 'package:notepad/services/file_service.dart';
 
 /// 测试用 AI 标题服务（不发起真实网络请求）。
@@ -277,6 +280,72 @@ void main() {
 
       expect(aiProvider.getFile('disk-1')?.title, 'disk.txt');
       expect(fakeAiService.callCount, 0);
+    });
+  });
+
+  group('编码与外部重载', () {
+    late Directory tempDir;
+
+    setUp(() {
+      tempDir = Directory.systemTemp.createTempSync('notepad_encoding_test_');
+    });
+
+    tearDown(() {
+      if (tempDir.existsSync()) {
+        tempDir.deleteSync(recursive: true);
+      }
+    });
+
+    test('applyExternalReload 应更新内容与快照并清除 dirty', () {
+      final file = provider.addNewFile();
+      provider.updateContent(file.id, '本地修改');
+      expect(provider.getFile(file.id)!.isDirty, true);
+
+      provider.applyExternalReload(file.id, '外部内容');
+
+      final reloaded = provider.getFile(file.id)!;
+      expect(reloaded.content, '外部内容');
+      expect(reloaded.diskContent, '外部内容');
+      expect(reloaded.isDirty, false);
+    });
+
+    test('switchEncoding 磁盘文件应重读并按新编码解码', () async {
+      final path = '${tempDir.path}/gbk.txt';
+      // '中文' 的 GBK 字节
+      File(path).writeAsBytesSync([0xD6, 0xD0, 0xCE, 0xC4]);
+      final file = provider.openFile(path);
+      expect(file.encoding, EncodingService.gbkName);
+
+      await provider.switchEncoding(file.id, EncodingService.windows1252Name);
+
+      final switched = provider.getFile(file.id)!;
+      expect(switched.encoding, EncodingService.windows1252Name);
+      // GBK 字节按 Windows-1252 解码得到 'ÖÐÎÄ'
+      expect(switched.content, 'ÖÐÎÄ');
+      expect(switched.diskContent, switched.content);
+      expect(switched.isDirty, false);
+    });
+
+    test('switchEncoding 未保存新文件应仅更改目标编码', () async {
+      final file = provider.addNewFile();
+      provider.updateContent(file.id, '本地内容');
+
+      await provider.switchEncoding(file.id, EncodingService.gbkName);
+
+      final switched = provider.getFile(file.id)!;
+      expect(switched.encoding, EncodingService.gbkName);
+      expect(switched.content, '本地内容');
+    });
+
+    test('setSaveEncoding 应保留本地内容', () {
+      final file = provider.addNewFile();
+      provider.updateContent(file.id, '未保存内容');
+
+      provider.setSaveEncoding(file.id, EncodingService.utf8Name);
+
+      final updated = provider.getFile(file.id)!;
+      expect(updated.content, '未保存内容');
+      expect(updated.encoding, EncodingService.utf8Name);
     });
   });
 }

@@ -10,12 +10,15 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'pages/home_page.dart';
+import 'providers/cursor_provider.dart';
 import 'providers/editor_provider.dart';
 import 'providers/file_list_provider.dart';
 import 'services/ai_config_service.dart';
 import 'services/ai_title_service.dart';
 import 'services/draft_service.dart';
+import 'services/encoding_service.dart';
 import 'services/file_service.dart';
+import 'services/file_watch_service.dart';
 
 /// 草稿服务实例（全局引用，用于窗口关闭时保存）。
 late DraftService _draftService;
@@ -27,8 +30,10 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // 初始化服务
-  _draftService = DraftService();
-  final fileService = FileService();
+  const encodingService = EncodingService();
+  _draftService = DraftService(encodingService: encodingService);
+  final fileService = FileService(encodingService: encodingService);
+  final fileWatchService = FileWatchService(encodingService: encodingService);
   final aiConfigService = AiConfigService();
   final aiTitleService = AiTitleService();
   await aiConfigService.load();
@@ -69,8 +74,13 @@ void main() async {
         ChangeNotifierProvider<EditorProvider>(
           create: (_) => EditorProvider(),
         ),
+        ChangeNotifierProvider<CursorProvider>(
+          create: (_) => CursorProvider(),
+        ),
         Provider<DraftService>.value(value: _draftService),
         Provider<FileService>.value(value: fileService),
+        Provider<EncodingService>.value(value: encodingService),
+        Provider<FileWatchService>.value(value: fileWatchService),
         Provider<AiConfigService>.value(value: aiConfigService),
         Provider<AiTitleService>.value(value: aiTitleService),
       ],

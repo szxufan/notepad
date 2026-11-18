@@ -11,30 +11,54 @@ import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
 
 import '../models/note_file.dart';
+import 'encoding_service.dart';
 
 /// 文件服务类。
 class FileService {
+  FileService({EncodingService? encodingService})
+      : encodingService = encodingService ?? const EncodingService();
+
   final _uuid = const Uuid();
+
+  /// 编码服务（检测/编解码）。
+  final EncodingService encodingService;
 
   /// 从磁盘读取文件内容，返回 [NoteFile]。
   ///
-  /// [path] 为文件绝对路径。
+  /// [path] 为文件绝对路径。自动检测文件编码（BOM/UTF-8/GBK/Windows-1252）。
   /// 抛出 [FileSystemException] 如果文件不存在或读取失败。
   NoteFile openFile(String path) {
     final file = File(path);
-    final content = file.readAsStringSync();
-    return NoteFile.fromDisk(_uuid.v4(), path, content);
+    final bytes = file.readAsBytesSync();
+    final detection = encodingService.detectAndDecode(bytes);
+    return NoteFile.fromDisk(
+      _uuid.v4(),
+      path,
+      detection.text,
+      encoding: detection.encodingName,
+    );
+  }
+
+  /// 按指定编码读取磁盘文件文本（用于手动切换编码）。
+  ///
+  /// 抛出 [FileSystemException] 如果文件不存在或读取失败。
+  String readFileWithEncoding(String path, String encodingName) {
+    final bytes = File(path).readAsBytesSync();
+    return encodingService.decode(bytes, encodingName);
   }
 
   /// 将 [file] 的内容写入磁盘。
   ///
+  /// 按 [NoteFile.encoding] 编码后写入。
   /// 更新 [filePath]、[diskContent]、[lastSavedAt]，并清除 [isDirty] 和 [isNew]。
+  /// 内容包含当前编码无法表示的字符时抛出 [EncodingException]。
   Future<NoteFile> saveFile(NoteFile file) async {
     if (file.filePath == null) {
       throw ArgumentError('filePath 不能为 null，请使用 saveFileAs');
     }
+    final bytes = encodingService.encode(file.content, file.encoding);
     final f = File(file.filePath!);
-    await f.writeAsString(file.content);
+    await f.writeAsBytes(bytes);
     final now = DateTime.now();
     return file.copyWith(
       diskContent: file.content,
@@ -47,8 +71,10 @@ class FileService {
 
   /// 打开另存为对话框，将内容写入新路径。
   ///
+  /// 沿用 [NoteFile.encoding] 编码（新建文件默认 UTF-8）。
   /// 返回更新后的 [NoteFile]。
   /// 用户取消选择时返回 null。
+  /// 内容包含当前编码无法表示的字符时抛出 [EncodingException]。
   Future<NoteFile?> saveFileAs(NoteFile file) async {
     final defaultName = file.isNew ? 'untitled.txt' : file.title;
     final defaultDir = file.filePath != null
@@ -67,8 +93,9 @@ class FileService {
     );
     if (path == null) return null;
     final actualPath = path.path;
+    final bytes = encodingService.encode(file.content, file.encoding);
     final f = File(actualPath);
-    await f.writeAsString(file.content);
+    await f.writeAsBytes(bytes);
     final now = DateTime.now();
     return file.copyWith(
       filePath: actualPath,

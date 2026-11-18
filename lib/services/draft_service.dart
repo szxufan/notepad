@@ -12,9 +12,16 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../models/note_file.dart';
+import 'encoding_service.dart';
 
 /// 草稿服务类。
 class DraftService {
+  DraftService({EncodingService? encodingService})
+      : encodingService = encodingService ?? const EncodingService();
+
+  /// 编码服务（按草稿记录的编码读取磁盘新内容）。
+  final EncodingService encodingService;
+
   /// 草稿文件名。
   static const String draftFileName = 'drafts.json';
 
@@ -85,26 +92,33 @@ class DraftService {
       // 对每个已保存文件，决定使用草稿内容还是磁盘内容
       final result = <NoteFile>[];
       for (final draft in drafts) {
-        if (draft.filePath != null && File(draft.filePath!).existsSync()) {
-          final stat = FileStat.statSync(draft.filePath!);
-          final diskModified = stat.modified;
-          // 草稿更新则用草稿内容，否则读取磁盘内容
-          if (draft.lastModified.isAfter(diskModified) ||
-              draft.lastModified.isAtSameMomentAs(diskModified)) {
-            result.add(draft);
+        try {
+          if (draft.filePath != null && File(draft.filePath!).existsSync()) {
+            final stat = FileStat.statSync(draft.filePath!);
+            final diskModified = stat.modified;
+            // 草稿更新则用草稿内容，否则读取磁盘内容
+            if (draft.lastModified.isAfter(diskModified) ||
+                draft.lastModified.isAtSameMomentAs(diskModified)) {
+              result.add(draft);
+            } else {
+              // 磁盘文件更新，按草稿记录的编码重新读取。
+              final bytes = File(draft.filePath!).readAsBytesSync();
+              final diskContent = encodingService.decode(bytes, draft.encoding);
+              result.add(draft.copyWith(
+                content: diskContent,
+                diskContent: diskContent,
+                isDirty: false,
+                lastModified: diskModified,
+                lastSavedAt: diskModified,
+              ));
+            }
           } else {
-            // 磁盘文件更新，重新读取
-            final diskContent = File(draft.filePath!).readAsStringSync();
-            result.add(draft.copyWith(
-              content: diskContent,
-              diskContent: diskContent,
-              isDirty: false,
-              lastModified: diskModified,
-              lastSavedAt: diskModified,
-            ));
+            // 未保存文件或磁盘文件已删除，直接用草稿内容
+            result.add(draft);
           }
-        } else {
-          // 未保存文件或磁盘文件已删除，直接用草稿内容
+        } catch (e) {
+          // 单个文件读取失败时保留其草稿，不影响其他文件恢复。
+          stderr.writeln('恢复文件草稿失败 (${draft.filePath ?? draft.title}): $e');
           result.add(draft);
         }
       }

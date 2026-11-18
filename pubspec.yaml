@@ -16,6 +16,7 @@ dependencies:
   uuid: ^4.0.0
   http: ^1.2.0
   desktop_drop: ^0.4.4
+  charset: ^2.0.1
 
 dev_dependencies:
   flutter_test:

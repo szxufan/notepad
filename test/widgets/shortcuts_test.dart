@@ -9,16 +9,28 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:notepad/models/note_file.dart';
 import 'package:notepad/pages/home_page.dart';
+import 'package:notepad/providers/cursor_provider.dart';
 import 'package:notepad/providers/editor_provider.dart';
 import 'package:notepad/providers/file_list_provider.dart';
 import 'package:notepad/services/draft_service.dart';
+import 'package:notepad/services/encoding_service.dart';
 import 'package:notepad/services/file_service.dart';
+import 'package:notepad/services/file_watch_service.dart';
 import 'package:provider/provider.dart';
+
+class _EncodingFailureFileService extends FileService {
+  @override
+  Future<NoteFile?> saveFileAs(NoteFile file) async {
+    throw const EncodingException(EncodingService.gbkName, '模拟编码失败');
+  }
+}
 
 void main() {
   late FileListProvider fileList;
   late EditorProvider editor;
+  late CursorProvider cursor;
   late DraftService draftService;
+  late FileWatchService fileWatchService;
 
   /// 模拟 Ctrl/Cmd + [key] 组合键。
   Future<void> sendCtrlKey(WidgetTester tester, LogicalKeyboardKey key) async {
@@ -40,7 +52,16 @@ void main() {
       ),
     ]);
     editor = EditorProvider();
+    cursor = CursorProvider();
     draftService = DraftService();
+    fileWatchService =
+        FileWatchService(encodingService: const EncodingService());
+  });
+
+  tearDown(() {
+    // 兜底清理定时器（正常路径由 disposeApp 触发 HomePage.dispose）
+    fileWatchService.stop();
+    draftService.stopAutoSave();
   });
 
   Future<void> pumpApp(WidgetTester tester) async {
@@ -49,7 +70,9 @@ void main() {
         providers: [
           ChangeNotifierProvider<FileListProvider>.value(value: fileList),
           ChangeNotifierProvider<EditorProvider>.value(value: editor),
+          ChangeNotifierProvider<CursorProvider>.value(value: cursor),
           Provider<DraftService>.value(value: draftService),
+          Provider<FileWatchService>.value(value: fileWatchService),
         ],
         child: const MaterialApp(home: HomePage()),
       ),
@@ -193,6 +216,37 @@ void main() {
     );
 
     await tester.pump(const Duration(milliseconds: 400));
+    await disposeApp(tester);
+  });
+
+  testWidgets('Ctrl+Shift+S 编码失败应显示回退对话框', (tester) async {
+    fileList = FileListProvider(fileService: _EncodingFailureFileService());
+    fileList.loadFromDrafts([
+      NoteFile(
+        id: 'encoding-error',
+        title: 'gbk.txt',
+        content: '😀',
+        diskContent: '',
+        isDirty: true,
+        lastModified: DateTime.now(),
+        encoding: EncodingService.gbkName,
+      ),
+    ]);
+    await pumpApp(tester);
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyS);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pump();
+
+    expect(find.text('无法以当前编码保存'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.tap(find.text('取消'));
+    await tester.pump();
+    expect(fileList.activeFile!.encoding, EncodingService.gbkName);
+
     await disposeApp(tester);
   });
 
