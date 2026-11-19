@@ -1,7 +1,7 @@
 name: notepad
 description: "一个桌面端纯文本记事本应用，支持多文件编辑、查找替换、草稿自动保存。"
 publish_to: 'none'
-version: 1.2.1+4
+version: 1.2.2+5
 
 environment:
   sdk: '>=3.0.0 <4.0.0'

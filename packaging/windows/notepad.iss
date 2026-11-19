@@ -6,7 +6,7 @@
 #endif
 
 #define AppName "Notepad"
-#define AppExeName "notepad.exe"
+#define AppExeName "szxNotepad.exe"
 
 [Setup]
 AppId={{6F0E60BA-5F2D-4844-BD6F-CF93287A6A41}
@@ -38,6 +38,10 @@ Name: "fileassoc"; Description: "将 .txt 文件关联到 Notepad"; GroupDescrip
 Source: "..\..\build\windows\x64\runner\Release\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; VC++ 2015-2022 运行库（构建时由 CI 下载），Flutter Windows 应用动态链接 MSVCP140.dll 等
 Source: "vc_redist.x64.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall
+
+[InstallDelete]
+; 清理 v1.2.1 及之前旧版残留的可执行文件（旧名与系统记事本撞名）
+Type: files; Name: "{app}\notepad.exe"
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"
